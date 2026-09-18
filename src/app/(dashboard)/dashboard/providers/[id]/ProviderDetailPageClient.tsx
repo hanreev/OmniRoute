@@ -483,8 +483,20 @@ export default function ProviderDetailPageClient() {
   const { customMap } = compat;
   const effectiveModelNormalize = compat.effectiveModelNormalize;
   const effectiveModelPreserveDeveloper = compat.effectiveModelPreserveDeveloper;
-  const effectiveModelHidden = compat.isModelHidden;
   const getUpstreamHeadersRecordForModel = compat.getUpstreamHeadersRecord;
+
+  // #12172: a model is hidden if (a) its custom/override row hides it for the
+  // active modality, OR (b) the server's modality-aware `hiddenModelsByProvider`
+  // lists it — the latter covers catalog-only models that have no customModels
+  // / compat-override row of their own but were hidden from the chat registry.
+  const effectiveModelHidden = useCallback(
+    (modelId: string): boolean => {
+      if (compat.isModelHidden(modelId, "chat")) return true;
+      const serverHidden = modelMeta.hiddenModelsByProvider[providerId];
+      return Array.isArray(serverHidden) && serverHidden.includes(modelId);
+    },
+    [compat, modelMeta.hiddenModelsByProvider, providerId]
+  );
 
   const compatibleFallbackModels = useMemo(
     () => getCompatibleFallbackModels(providerId, modelMeta.customModels),

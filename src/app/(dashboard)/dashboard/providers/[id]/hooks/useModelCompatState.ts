@@ -28,8 +28,8 @@ export interface ModelCompatState {
   customMap: CompatModelMap;
   /** The computed override map (memoised). */
   overrideMap: CompatModelMap;
-  /** Stable callback: is the given model hidden? */
-  isModelHidden: (modelId: string) => boolean;
+  /** Stable callback: is the given model hidden (for a modality)? */
+  isModelHidden: (modelId: string, modality?: string) => boolean;
   /** Stable callback: effective normalize flag for (modelId, protocol). */
   effectiveModelNormalize: (modelId: string, protocol?: string) => boolean;
   /** Stable callback: effective preserve-developer flag for (modelId, protocol). */
@@ -56,7 +56,8 @@ export function useModelCompatState(
   const overrideMap = useMemo(() => buildCompatMap(modelCompatOverrides), [modelCompatOverrides]);
 
   const isModelHidden = useCallback(
-    (modelId: string) => isModelHiddenFn(modelId, customMap, overrideMap),
+    (modelId: string, modality?: string) =>
+      isModelHiddenFn(modelId, customMap, overrideMap, modality ?? "chat"),
     [customMap, overrideMap]
   );
 

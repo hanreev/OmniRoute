@@ -90,6 +90,42 @@ describe("providerPageHelpers — model-compat pure functions", () => {
     expect(isModelHiddenFn("gpt-5-mini", customMap, overrideMap)).toBe(true);
   });
 
+  it("isModelHiddenFn honors hiddenModalities scoped to the active modality (#12172)", () => {
+    const customMap = buildCompatMap([]);
+    const overrideMap = buildCompatMap([
+      { id: "gpt-5-mini", isHidden: false, hiddenModalities: { chat: true } },
+    ]);
+
+    // Explicit chat-scoped hide wins over legacy top-level isHidden=false.
+    expect(isModelHiddenFn("gpt-5-mini", customMap, overrideMap)).toBe(true);
+    // Default modality is "chat" when omitted.
+    expect(isModelHiddenFn("gpt-5-mini", customMap, overrideMap, undefined)).toBe(true);
+    // A different modality with no scoped entry falls back to legacy isHidden.
+    expect(isModelHiddenFn("gpt-5-mini", customMap, overrideMap, "images")).toBe(false);
+  });
+
+  it("isModelHiddenFn falls back to legacy isHidden when modality has no scoped entry", () => {
+    const customMap = buildCompatMap([]);
+    const overrideMap = buildCompatMap([
+      { id: "gpt-5-mini", isHidden: true, hiddenModalities: { chat: false } },
+    ]);
+
+    // chat explicitly unhidden despite legacy isHidden=true.
+    expect(isModelHiddenFn("gpt-5-mini", customMap, overrideMap, "chat")).toBe(false);
+    // images has no scoped entry → legacy isHidden=true applies.
+    expect(isModelHiddenFn("gpt-5-mini", customMap, overrideMap, "images")).toBe(true);
+  });
+
+  it("isModelHiddenFn reads hiddenModalities from customModels rows too", () => {
+    const customMap = buildCompatMap([
+      { id: "gpt-4o", isHidden: false, hiddenModalities: { chat: true } },
+    ]);
+    const overrideMap = buildCompatMap([]);
+
+    expect(isModelHiddenFn("gpt-4o", customMap, overrideMap)).toBe(true);
+    expect(isModelHiddenFn("gpt-4o", customMap, overrideMap, "images")).toBe(false);
+  });
+
   it("getDisplayModelAlias ignores provider-scoped identity aliases", () => {
     expect(getDisplayModelAlias("gpt-4o-2024-11-20", "gpt-4o-2024-11-20")).toBeNull();
     expect(getDisplayModelAlias("gpt-5-mini", "fast-mini")).toBe("fast-mini");

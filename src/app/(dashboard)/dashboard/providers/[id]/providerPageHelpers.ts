@@ -85,6 +85,12 @@ export type CompatModelRow = {
   normalizeToolCallId?: boolean;
   preserveOpenAIDeveloperRole?: boolean;
   isHidden?: boolean;
+  /** #12172: modality-scoped hide. An explicit `hiddenModalities[modality]`
+   * entry overrides the legacy global `isHidden` flag for that modality only
+   * (mirrors `ModelCompatOverride.hiddenModalities` in src/lib/db/models/compat.ts),
+   * so hiding a model on one registry surface never suppresses an
+   * identically-ID'd model registered under another modality. */
+  hiddenModalities?: Record<string, boolean>;
   upstreamHeaders?: Record<string, string>;
   compatByProtocol?: CompatByProtocolMap;
   /** #2905: per-model upstream wire-format override. */ targetFormat?: string;
@@ -510,8 +516,19 @@ export function getDisplayModelAlias(modelId: string, alias?: string | null): st
   return trimmed;
 }
 
-function readActiveHiddenFlag(row: CompatModelRow | undefined): boolean | undefined {
+/**
+ * Resolve whether a compat row hides its model for a given modality.
+ * Precedence mirrors `isOverrideHiddenForModality` (src/lib/db/models/compat.ts):
+ * an explicit `hiddenModalities[modality]` entry always wins; otherwise fall
+ * back to the legacy all-modalities `isHidden` flag.
+ */
+function readActiveHiddenFlag(
+  row: CompatModelRow | undefined,
+  modality: string
+): boolean | undefined {
   if (!row) return undefined;
+  const scoped = row.hiddenModalities?.[modality];
+  if (scoped !== undefined) return Boolean(scoped);
   if (Object.prototype.hasOwnProperty.call(row, "isHidden")) {
     return Boolean(row.isHidden);
   }
@@ -521,12 +538,13 @@ function readActiveHiddenFlag(row: CompatModelRow | undefined): boolean | undefi
 export function isModelHiddenFn(
   modelId: string,
   customMap: CompatModelMap,
-  overrideMap: CompatModelMap
+  overrideMap: CompatModelMap,
+  modality = "chat"
 ): boolean {
-  const customHidden = readActiveHiddenFlag(customMap.get(modelId));
+  const customHidden = readActiveHiddenFlag(customMap.get(modelId), modality);
   if (customHidden !== undefined) return customHidden;
 
-  const overrideHidden = readActiveHiddenFlag(overrideMap.get(modelId));
+  const overrideHidden = readActiveHiddenFlag(overrideMap.get(modelId), modality);
   if (overrideHidden !== undefined) return overrideHidden;
 
   return false;

@@ -23,6 +23,11 @@ import { providerText, type CompatModelRow } from "../providerPageHelpers";
 export interface ModelMeta {
   customModels: CompatModelRow[];
   modelCompatOverrides: Array<CompatModelRow & { id: string }>;
+  /** #12172: modality-aware hidden-model map, provider-keyed, as computed by
+   * GET /api/provider-models (`hiddenModelsByProvider`). Unioning this with
+   * the per-row `isHidden`/`hiddenModalities` state covers catalog-only models
+   * that have no customModels/compat-override row of their own. */
+  hiddenModelsByProvider: Record<string, string[]>;
 }
 
 export interface UseProviderModelsReturn {
@@ -46,6 +51,7 @@ export function useProviderModels(
   const [modelMeta, setModelMeta] = useState<ModelMeta>({
     customModels: [],
     modelCompatOverrides: [],
+    hiddenModelsByProvider: {},
   });
   const [syncedCatalog, setSyncedCatalog] = useState({
     providerId: "",
@@ -133,6 +139,7 @@ export function useProviderModels(
       setModelMeta({
         customModels: data.models || [],
         modelCompatOverrides: data.modelCompatOverrides || [],
+        hiddenModelsByProvider: data.hiddenModelsByProvider || {},
       });
       try {
         const syncRes = await fetch(
