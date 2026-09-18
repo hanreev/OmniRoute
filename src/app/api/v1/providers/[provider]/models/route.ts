@@ -1,4 +1,5 @@
 import { getUnifiedModelsResponse } from "@/app/api/v1/models/catalog";
+import { catalogJsonResponse } from "@/app/api/v1/models/catalogPagination";
 import { getProviderNodeById } from "@/lib/db/providers/nodes";
 import { getServiceModels } from "@/lib/db/serviceModels";
 import { isServiceBackendPluginId } from "@/lib/services/serviceBackends";
@@ -120,14 +121,22 @@ export async function GET(request: Request, { params }: { params: Promise<{ prov
     });
   }
 
-  return Response.json(
+  // Keep only frame/semantic headers from the underlying catalog response — NEVER
+  // its `content-length`: the catalog serialized the full /v1/models body with its
+  // exact byte count, but we are returning a much smaller provider-filtered subset,
+  // so reusing the original `content-length` makes strict clients (browser fetch,
+  // the dashboard test panel) wait for bytes that are never sent and show an empty
+  // body. `catalogJsonResponse` sets an accurate content-length/content-type.
+  const forwarded = new Headers(response.headers);
+  for (const name of ["content-length", "content-encoding", "transfer-encoding"]) {
+    forwarded.delete(name);
+  }
+  return catalogJsonResponse(
     {
       object: payload.object || "list",
       data: [...deduped.values()],
     },
-    {
-      status: response.status,
-      headers: response.headers,
-    }
+    forwarded,
+    response.status
   );
 }

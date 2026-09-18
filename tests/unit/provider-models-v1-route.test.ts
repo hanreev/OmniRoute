@@ -170,3 +170,36 @@ test("GET /v1/providers/:provider/models rejects non-matching connection-like st
   const body = await res.json();
   assert.equal(body.error?.code, "invalid_provider");
 });
+
+test("provider-scoped models response content-length matches the filtered body, not the full catalog", async () => {
+  // Regression for the empty-body bug: the route re-serializes only the models OWNED
+  // by the requested provider, but used to forward the underlying /v1/models response
+  // `content-length` (byte count of the FULL catalog). Strict clients trusted that
+  // header and waited for bytes that were never sent, so the dashboard test panel
+  // showed an empty/never-resolving body. `opencode` is an always-active NOAUTH
+  // provider, so its filtered body is strictly smaller than the full catalog.
+  const res = await callGET("opencode");
+
+  assert.equal(res.status, 200);
+  const bodyText = await res.clone().text();
+  const declared = res.headers.get("content-length");
+  assert.ok(declared, "response must carry an explicit content-length");
+  assert.equal(
+    Number(declared),
+    Buffer.byteLength(bodyText),
+    "content-length must equal the actual filtered body size, not the full catalog"
+  );
+
+  const body = JSON.parse(bodyText) as { object: string; data: Array<{ owned_by: string }> };
+  assert.equal(body.object, "list");
+  assert.ok(
+    Array.isArray(body.data) && body.data.length > 0,
+    "provider models list must be non-empty"
+  );
+  for (const model of body.data) {
+    assert.ok(
+      model.owned_by === "opencode" || model.owned_by === "oc",
+      `unexpected owner ${model.owned_by}`
+    );
+  }
+});
