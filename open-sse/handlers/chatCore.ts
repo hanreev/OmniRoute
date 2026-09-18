@@ -123,7 +123,11 @@ import { resolveChatCoreTargetFormat } from "./chatCore/targetFormat.ts";
 import { resolveOmniGlyphTransport } from "../services/compression/imageTransportPolicy.ts";
 import { stripStore, usesClaudeBridge } from "./chatCore/agentRouterProtocol.ts";
 import { normalizeClaudeToolsForDispatch } from "./chatCore/claudeToolDefaults.ts";
-import { injectSystemPrompt, injectCustomSystemPrompt } from "../services/systemPrompt.ts";
+import {
+  injectCustomSystemPrompt,
+  injectSystemPromptPostTranslation,
+  injectSystemPromptPreTranslation,
+} from "../services/systemPrompt.ts";
 import { translateRequest, needsTranslation } from "../translator/index.ts";
 import { applyReasoningRuleDirective } from "@/lib/reasoningRouting/policy";
 import { withReasoningRuleContext } from "../utils/reasoningRuleContext.ts";
@@ -141,6 +145,7 @@ import { ensureStreamReadiness } from "../utils/streamReadiness.ts";
 import { resolveSuppressThinkClose, THINKING_MARKER_HEADER } from "../utils/thinkCloseMarker.ts";
 import { resolveStreamReadinessTimeout } from "../utils/streamReadinessPolicy.ts";
 import { resolveAgentGoalPolicy } from "../utils/agentGoalPolicy.ts";
+import { hasActiveClaudeThinking } from "../utils/thinkingBudget.ts";
 import { createStreamController } from "../utils/streamHandler.ts";
 import * as streamFailure from "../utils/streamFailureFinalization.ts";
 import { normalizeUsage } from "../utils/usageTracking.ts";
@@ -595,7 +600,6 @@ export async function handleChatCore({
     };
   };
   let tokensCompressed: number | null = null;
-  body = injectSystemPrompt(body);
   // ── Per-endpoint custom system prompt (port of upstream #2063) ──
   // Reads from cachedSettings if available (passed in from combo/chat layer)
   // to avoid an extra DB read on the hot path. Falls through to getCachedSettings()
@@ -1252,7 +1256,7 @@ export async function handleChatCore({
     stream: !!stream,
     reqLogger,
     effectiveServiceTier,
-    connectionId,
+    pendingScope,
     startTime,
     log,
     persistAttemptLogs,
@@ -2505,6 +2509,12 @@ export async function handleChatCore({
         model || "",
         sourceFormat
       );
+      // Carrier-less targets (kiro / antigravity) have no post-translation
+      // system carrier for the single pass at ~3068 to write into — inject
+      // into the client body BEFORE translation so their user-merge /
+      // relocation paths carry the global prompt (baseline coverage of the
+      // removed pre-translation pass). The gate writes ONE carrier only.
+      translatedBody = injectSystemPromptPreTranslation(translatedBody, { targetFormat });
       translatedBody = translateRequest(
         sourceFormat,
         targetFormat,
@@ -3096,6 +3106,19 @@ export async function handleChatCore({
         bypassDefaultToolLimit: isOpencodeClient,
         isOpencodeClient,
       });
+
+      // Global System Prompt — SINGLE injection point (post-translation) for
+      // carrier-ful targets. The old unconditional pre-translation pass
+      // (former chatCore injectSystemPrompt call) was removed: it chained
+      // with this pass to inject prefix/suffix 2-3x and dual-wrote
+      // body.system + messages[] on the claude path, which strict upstreams
+      // (HCP-Vision vLLM: "System message must be at the beginning") reject
+      // with 400. Format-aware via targetFormat: messages[] (openai/codex —
+      // prefix FIRST system, suffix LAST), claude `system` field, gemini
+      // `systemInstruction`, responses `instructions`. Carrier-less targets
+      // (kiro user-fold, antigravity Cloud Code envelope) are covered by the
+      // gated PRE-translation pass before translateRequest instead.
+      bodyToSend = injectSystemPromptPostTranslation(bodyToSend, { targetFormat });
 
       updatePendingScope(pendingScope, {
         providerRequest: bodyToSend,
@@ -5428,7 +5451,7 @@ export async function handleChatCore({
       // this check runs after translation + sanitization + tool-call execution to catch
       // cases where a provider returns a structurally valid raw body that translates into
       // choices:[] or output:[] with no usable content (Responses API shape included).
-      const malformedTranslatedReason = detectMalformedNonStream(translatedResponse);
+      const malformedTranslatedReason = detectMalformedNonStream(translatedResponse, provider);
       if (malformedTranslatedReason) {
         const totalLatency = Date.now() - startTime;
         const rawBytes = (() => {
@@ -6066,6 +6089,19 @@ export async function handleChatCore({
     !isDroidCLI;
   const streamStateBody = finalBody || body;
 
+  // Client's explicit thinking intent (Anthropic Messages shape). Claude Code
+  // sends `{type:"enabled"}` or `{type:"adaptive"}` to opt into relaying
+  // upstream reasoning_content as Claude thinking blocks; `{type:"disabled"}`
+  // or an omitted `thinking` field opts out. Kept false for every other
+  // client schema (OpenAI / Responses), which never express intent through
+  // `body.thinking`. Mirrors hasActiveClaudeThinking() so the request and
+  // response sides agree on what counts as "thinking requested" — a prior
+  // inline `=== "enabled"` check silently suppressed `adaptive` (the intent
+  // Claude Code actually sends), leaking the mismatch as a broken tool-call
+  // turn (call log 1787566395384-bab9ab: reasoning dropped → model emitted
+  // DSML tool-call markers as plain text → incomplete `stop` finish).
+  const requestedThinking = hasActiveClaudeThinking((body ?? {}) as Record<string, unknown>);
+
   if (needsResponsesTranslation) {
     // Provider returns openai-responses, translate to openai (Chat Completions) that clients expect
     log?.debug?.("STREAM", `Responses translation mode: openai-responses → openai`);
@@ -6083,6 +6119,7 @@ export async function handleChatCore({
       handleStreamFailure,
       copilotCompatibleReasoning,
       false,
+      requestedThinking,
       customToolNames,
       // openai-responses → openai translation still wants the namespace identity
       // map for #7936-style round-trip closure when the client also speaks
@@ -6116,6 +6153,7 @@ export async function handleChatCore({
         thinkingMarkerHeader,
         clientResponseFormat,
       }),
+      requestedThinking,
       customToolNames,
       requestToolIdentityMap
     );
