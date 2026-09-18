@@ -4,7 +4,12 @@ import { join, dirname } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { platform, totalmem } from "node:os";
 import { t } from "../i18n.mjs";
-import { writePidFile, cleanupPidFile, waitForServer, resolveReadyTimeoutMs } from "../utils/pid.mjs";
+import {
+  writePidFile,
+  cleanupPidFile,
+  waitForServer,
+  resolveReadyTimeoutMs,
+} from "../utils/pid.mjs";
 import {
   ServerSupervisor,
   detectMitmCrash,
@@ -305,7 +310,8 @@ export async function runServe(opts = {}) {
     opts.maxRestarts ?? 2,
     startedAt,
     useTray,
-    { trayReadyPort: opts.trayReadyPort, trayReadyToken: opts.trayReadyToken }
+    { trayReadyPort: opts.trayReadyPort, trayReadyToken: opts.trayReadyToken },
+    opts.readyTimeout
   );
 }
 
@@ -419,7 +425,8 @@ async function runWithSupervisor(
   maxRestarts,
   startedAt,
   useTray = false,
-  { trayReadyPort, trayReadyToken } = {}
+  { trayReadyPort, trayReadyToken } = {},
+  readyTimeout = 60000
 ) {
   if (showLog) process.env.OMNIROUTE_SHOW_LOG = "1";
   writePidFile("supervisor", process.pid);
@@ -458,7 +465,7 @@ async function runWithSupervisor(
   });
 
   if (!showLog) {
-    const readyTimeoutMs = resolveReadyTimeoutMs({ timeoutMs: opts.readyTimeout });
+    const readyTimeoutMs = resolveReadyTimeoutMs({ timeoutMs: readyTimeout });
     waitForServer(dashboardPort, readyTimeoutMs).then(async (up) => {
       if (up) {
         if (useTray) {
