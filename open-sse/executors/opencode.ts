@@ -1208,18 +1208,29 @@ export class OpencodeExecutor extends BaseExecutor {
     const tools: any[] = Array.isArray(body.tools) ? body.tools : [];
     const existingTools = tools
       .filter((tool) => tool.type === "function")
-      .map((tool) => tool.function.name);
+      .map((tool) => tool.function?.name ?? tool.name);
     const missingTools = [...new Set(requiredTools).difference(new Set(existingTools))];
 
-    for (const name of missingTools) {
-      tools.push({
-        type: "function",
-        function: {
+    if(model.startsWith('muse-spark')) {
+      for (const name of missingTools) {
+        tools.push({
+          type: "function",
           name,
           description: "dummy tool. do not use.",
           parameters: {},
-        },
-      });
+        });
+      }
+    } else {
+      for (const name of missingTools) {
+        tools.push({
+          type: "function",
+          function: {
+            name,
+            description: "dummy tool. do not use.",
+            parameters: {},
+          },
+        });
+      }
     }
 
     body.tools = tools;
