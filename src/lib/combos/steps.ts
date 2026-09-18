@@ -5,9 +5,17 @@
  * @changes
  * - [2026-07-25] [Composer] - Preserve provider-wildcard steps during combo normalization
  */
-import { SYNTHETIC_NOAUTH_CONNECTION_ID } from "@omniroute/open-sse/services/autoCombo/resilienceCandidateFilter.ts";
-
 type JsonRecord = Record<string, unknown>;
+
+/**
+ * LOCAL constant — do NOT import from ../services/autoCombo/resilienceCandidateFilter breaking the
+ * browser bundle. This dashboard page's browser bundle transitively pulls playwright via that
+ * module (accountFallback → chatgptWebExecutorAdapter → browserPool → playwright), and playwright-core
+ * require()s Node builtins like `tls` that do not exist in the browser — "Module not found: Can't
+ * resolve 'tls'". Keep this mirror of the canonical value (open-sse/services/autoCombo/resilienceCandidateFilter.ts)
+ * duplicated to keep the value out of the browser bundle.
+ */
+const SYNTHETIC_NOAUTH_CONNECTION_ID = "noauth";
 
 export const COMBO_SCHEMA_VERSION = 2;
 
