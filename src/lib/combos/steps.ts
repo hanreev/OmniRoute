@@ -5,6 +5,8 @@
  * @changes
  * - [2026-07-25] [Composer] - Preserve provider-wildcard steps during combo normalization
  */
+import { SYNTHETIC_NOAUTH_CONNECTION_ID } from "@omniroute/open-sse/services/autoCombo/resilienceCandidateFilter.ts";
+
 type JsonRecord = Record<string, unknown>;
 
 export const COMBO_SCHEMA_VERSION = 2;
@@ -210,12 +212,27 @@ export function getComboModelProvider(value: unknown): string | null {
  * pool. Treat a missing/undefined/empty allowlist as [connectionId] when a
  * pin is present. With no pin, [] stays [] (comboStructure drops it, same
  * as omitted: whole pool).
+ *
+ * EXCEPTION: the synthetic no-auth connection id (`SYNTHETIC_NOAUTH_CONNECTION_ID`,
+ * "noauth") is not an operator-chosen connection — it marks an `auto/*` free
+ * candidate that routes keylessly. Promoting it to a hard allowlist makes it
+ * unpinnable: no real DB row carries "noauth", and the #9057 synthetic-fallback
+ * guard rejects it in any explicit allowlist, so every no-auth free model 403s
+ * with "excluded by this API key's connection allowlist". Treat it as "no pin"
+ * (whole pool), which lets the no-auth path stay reachable.
  */
 export function implicitPinAllowlist(
   connectionId: string | null | undefined,
   allowedConnectionIds: string[] | null | undefined
 ): string[] | null {
   const pin = typeof connectionId === "string" ? connectionId.trim() : "";
+  if (pin === SYNTHETIC_NOAUTH_CONNECTION_ID) {
+    // Synthetic no-auth marker: not a real pin. An explicit allowlist is
+    // honored; otherwise behave like no pin (whole pool → no-auth path).
+    return Array.isArray(allowedConnectionIds) && allowedConnectionIds.length > 0
+      ? allowedConnectionIds
+      : null;
+  }
   if (Array.isArray(allowedConnectionIds) && allowedConnectionIds.length > 0) {
     return allowedConnectionIds;
   }
